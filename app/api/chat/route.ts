@@ -5,7 +5,7 @@ import {
   stepCountIs,
   streamText,
 } from "ai";
-import { getSystemPrompt } from "./prompts";
+import { buildPrompt } from "./prompts";
 import { chatTools } from "./tools";
 
 export async function POST(request: Request) {
@@ -22,10 +22,7 @@ export async function POST(request: Request) {
 
   const result = streamText({
     model: google("gemini-2.5-flash"),
-    system: `${getSystemPrompt("default")}
-
-For any customer support, policy, FAQ, return, shipping, payment, or warranty question, call the vectorSearch tool first before answering.
-Base answers on retrieved chunks and avoid guessing policy details.`,
+    system: buildPrompt(["support", "shipping-returns"]),
     messages: modelMessages,
     tools: chatTools,
     stopWhen: stepCountIs(5),
