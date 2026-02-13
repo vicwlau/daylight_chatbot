@@ -1,4 +1,4 @@
-import { google } from "@ai-sdk/google";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateObject } from "ai";
 import { z } from "zod";
 import {
@@ -21,6 +21,24 @@ const sentimentAnalysisSchema = z.object({
 
 export async function POST(request: Request) {
   try {
+    const googleApiKey = (
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
+      process.env.GOOGLE_API_KEY ??
+      ""
+    ).trim();
+
+    if (!googleApiKey) {
+      return Response.json(
+        {
+          error:
+            "Missing Google API key. Set GOOGLE_GENERATIVE_AI_API_KEY or GOOGLE_API_KEY in .env.local and restart dev server.",
+        },
+        { status: 500 },
+      );
+    }
+
+    const google = createGoogleGenerativeAI({ apiKey: googleApiKey });
+
     const payload: unknown = await request.json();
 
     const conversationHistory =
