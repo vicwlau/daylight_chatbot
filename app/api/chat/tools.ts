@@ -1,10 +1,5 @@
 import { z } from "zod";
 
-type GoogleSearchInput = {
-  query: string;
-  limit: number;
-};
-
 type VectorSearchInput = {
   query: string;
   topK: number;
@@ -34,9 +29,20 @@ const vectorMatchSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).catch({}),
 });
 
+const vectorResultItemSchema = z.object({
+  id: z.string().optional(),
+  score: z.number(),
+  text: z.string(),
+  metadata: z.record(z.string(), z.unknown()).optional().catch({}),
+});
+
 const vectorApiResponseSchema = z.union([
   z.array(vectorMatchSchema),
   z.object({ matches: z.array(vectorMatchSchema) }),
+  z.object({
+    query: z.string().optional(),
+    results: z.array(vectorResultItemSchema),
+  }),
 ]);
 
 const placeholderVectorMatches: VectorSearchMatch[] = [
@@ -54,12 +60,30 @@ const placeholderVectorMatches: VectorSearchMatch[] = [
   },
 ];
 
+const isVectorDebugEnabled =
+  process.env.VECTOR_SEARCH_DEBUG === "1" ||
+  process.env.NODE_ENV === "development";
+
+function logVectorDebug(message: string, data?: unknown) {
+  if (!isVectorDebugEnabled) {
+    return;
+  }
+
+  if (data === undefined) {
+    console.log(`[vector-search] ${message}`);
+    return;
+  }
+
+  console.log(`[vector-search] ${message}`, data);
+}
+
 async function fetchVectorMatches({
   query,
   topK,
 }: Pick<VectorSearchInput, "query" | "topK">): Promise<VectorSearchMatch[]> {
   const vectorSearchUrl =
-    process.env.VECTOR_SEARCH_URL || "http://172.24.2.23:8000/query";
+    process.env.VECTOR_SEARCH_URL ||
+    "https://oidioid-blessedly-tifany.ngrok-free.dev/query";
 
   if (!vectorSearchUrl) {
     throw new Error("VECTOR_SEARCH_URL is not configured.");
@@ -67,46 +91,83 @@ async function fetchVectorMatches({
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
+  const startedAt = Date.now();
+
+  const requestBody = {
+    query,
+    top_n: topK,
+  };
+
+  logVectorDebug("request:start", {
+    url: vectorSearchUrl,
+    body: requestBody,
+  });
 
   try {
     const response = await fetch(vectorSearchUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Accept: "application/json",
+        "ngrok-skip-browser-warning": "true",
       },
-      body: JSON.stringify({ query, topK }),
+      body: JSON.stringify(requestBody),
       signal: controller.signal,
+    });
+
+    const durationMs = Date.now() - startedAt;
+    const responseText = await response.text();
+
+    logVectorDebug("request:response", {
+      status: response.status,
+      ok: response.ok,
+      durationMs,
+      contentType: response.headers.get("content-type"),
+      bodyPreview: responseText.slice(0, 500),
     });
 
     if (!response.ok) {
       throw new Error(
-        `Vector search API failed with status ${response.status}`,
+        `Vector search API failed with status ${response.status}. Body preview: ${responseText.slice(0, 200)}`,
       );
     }
 
-    const payload: unknown = await response.json();
+    let payload: unknown;
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      throw new Error(
+        `Vector search API returned non-JSON response. Body preview: ${responseText.slice(0, 200)}`,
+      );
+    }
+
     const parsed = vectorApiResponseSchema.parse(payload);
 
-    return Array.isArray(parsed) ? parsed : parsed.matches;
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+
+    if ("matches" in parsed) {
+      return parsed.matches;
+    }
+
+    return parsed.results.map((result, index) => ({
+      id: result.id ?? `result_${index}`,
+      score: result.score,
+      text: result.text,
+      metadata: result.metadata ?? {},
+    }));
+  } catch (error) {
+    const durationMs = Date.now() - startedAt;
+    const message = error instanceof Error ? error.message : "Unknown error";
+    logVectorDebug("request:error", {
+      durationMs,
+      message,
+    });
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
-}
-
-async function runGoogleSearch({ query, limit }: GoogleSearchInput) {
-  return {
-    provider: "google-search-placeholder",
-    query,
-    limit,
-    items: [
-      {
-        title: "Placeholder search result",
-        url: "https://example.com",
-        snippet:
-          "Replace runGoogleSearch with a real Google Search integration.",
-      },
-    ],
-  };
 }
 
 async function runVectorSearch({
@@ -120,41 +181,36 @@ async function runVectorSearch({
   try {
     allMatches = await fetchVectorMatches({ query, topK });
     provider = "vector-search-api";
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    logVectorDebug("fallback:placeholder", {
+      reason: message,
+    });
     allMatches = placeholderVectorMatches;
     provider = "vector-search-placeholder";
   }
 
   const matches = allMatches.filter((match) => match.score >= scoreThreshold);
+  const finalMatches = matches.length > 0 ? matches : allMatches.slice(0, topK);
 
   return {
     provider,
     query,
     topK,
     scoreThreshold,
-    matches,
-    textChunks: matches.map((match) => match.text),
+    matches: finalMatches,
+    textChunks: finalMatches.map((match) => match.text),
   };
 }
 
 export const chatTools = {
-  googleSearch: {
-    description: "Searches the web for recent information.",
-    inputSchema: z.object({
-      query: z.string().min(1),
-      limit: z.number().int().min(1).max(10).default(5),
-    }),
-    execute: async ({ query, limit }: GoogleSearchInput) => {
-      return runGoogleSearch({ query, limit });
-    },
-  },
   vectorSearch: {
     description:
       "Searches the knowledge base for semantically relevant documents.",
     inputSchema: z.object({
       query: z.string().min(1),
       topK: z.number().int().min(1).max(20).default(5),
-      scoreThreshold: z.number().min(0).max(1).default(0.75),
+      scoreThreshold: z.number().default(0),
     }),
     execute: async ({
       query,

@@ -39,7 +39,9 @@ export function buildPrompt(scenarios: PromptScenario[]): string {
     return systemPrompts.default;
   }
 
-  const uniqueScenarios = Array.from(new Set(["default", ...scenarios]));
+  const uniqueScenarios: PromptScenario[] = Array.from(
+    new Set<PromptScenario>(["default", ...scenarios]),
+  );
   return uniqueScenarios
     .map((scenario) => systemPrompts[scenario])
     .join("\n\n");
