@@ -8,13 +8,30 @@ import {
 import { buildPrompt } from "./prompts";
 import { chatTools } from "./tools";
 
+function normalizeApiKey(value: string): string {
+  return value
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim()
+    .replace(/^['\"]|['\"]$/g, "");
+}
+
 export async function POST(request: Request) {
-  const googleApiKey =
-    (
-      process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
-      process.env.GOOGLE_API_KEY ??
-      ""
-    ).trim();
+  const rawPrimaryKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? "";
+  const rawFallbackKey = process.env.GOOGLE_API_KEY ?? "";
+  const primaryKey = normalizeApiKey(rawPrimaryKey);
+  const fallbackKey = normalizeApiKey(rawFallbackKey);
+  const googleApiKey = primaryKey || fallbackKey;
+  const keySource = primaryKey
+    ? "GOOGLE_GENERATIVE_AI_API_KEY"
+    : fallbackKey
+      ? "GOOGLE_API_KEY"
+      : "none";
+
+  console.log("[chat] google key diagnostics:", {
+    keySource,
+    keyLength: googleApiKey.length,
+    looksLikeGoogleKey: googleApiKey.startsWith("AIza"),
+  });
 
   if (!googleApiKey) {
     return Response.json(

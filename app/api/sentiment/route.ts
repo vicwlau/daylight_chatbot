@@ -6,6 +6,13 @@ import {
   SENTIMENT_PRIORITY_SYSTEM_PROMPT,
 } from "./prompts";
 
+function normalizeApiKey(value: string): string {
+  return value
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim()
+    .replace(/^['\"]|['\"]$/g, "");
+}
+
 const sentimentAnalysisSchema = z.object({
   sentiment: z.enum([
     "very-negative",
@@ -21,11 +28,11 @@ const sentimentAnalysisSchema = z.object({
 
 export async function POST(request: Request) {
   try {
-    const googleApiKey = (
-      process.env.GOOGLE_GENERATIVE_AI_API_KEY ??
-      process.env.GOOGLE_API_KEY ??
-      ""
-    ).trim();
+    const rawPrimaryKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? "";
+    const rawFallbackKey = process.env.GOOGLE_API_KEY ?? "";
+    const primaryKey = normalizeApiKey(rawPrimaryKey);
+    const fallbackKey = normalizeApiKey(rawFallbackKey);
+    const googleApiKey = primaryKey || fallbackKey;
 
     if (!googleApiKey) {
       return Response.json(
