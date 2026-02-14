@@ -2,6 +2,9 @@
 
 import { FormEvent, useState } from "react";
 import { useChat } from "@ai-sdk/react";
+import { SentimentAssessment } from "./SentimentAssessment";
+
+const SHOW_SENTIMENT_ASSESSMENT = true;
 
 export function ChatInterface() {
   const { messages, sendMessage, status, error } = useChat({
@@ -60,6 +63,11 @@ export function ChatInterface() {
           Something went wrong. Check your API route and key.
         </p>
       ) : null}
+
+      {/* <SentimentAssessment
+        conversationHistory={messages}
+        hidden={!SHOW_SENTIMENT_ASSESSMENT}
+      /> */}
 
       <form onSubmit={onSubmit} className="mt-3 flex gap-2">
         <input
